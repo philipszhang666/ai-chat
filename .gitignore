@@ -1,0 +1,65 @@
+# ============ 凭证/密钥（绝不能提交）============
+~/.aichat_terminal_token
+.aichat_terminal_token
+lms_tool/.lms_cookie
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+.agent/checkpoints/
+.agent/
+
+# ============ LMS 本地数据/下载 ============
+lms_tool/data/
+lms_tool/downloads/
+
+# ============ Python ============
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ============ Node / 前端（如未来引入构建）============
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+dist/
+.cache/
+
+# ============ IDE / 编辑器 ============
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ============ 备份与临时文件 ============
+*.bak
+*.tmp
+*.log
+backup-*.json
+aichat-backup-*.json
+request-history*.json
+request_history*.json
+*.local
+*.local.*
+*.db
+*.sqlite
+*.sqlite3
+*.pid
+*.seed
+*.cache

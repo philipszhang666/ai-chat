@@ -1,0 +1,10 @@
+此文件仅为示例。请复制为 .lms_cookie 并填入真实 Cookie。
+.lms_cookie 已被 .gitignore 排除，不会提交到版本库。
+
+获取方法：
+  1. 浏览器登录 https://lms.xjtu.edu.cn/
+  2. F12 → Console → 输入 copy(document.cookie) → 回车
+  3. 把剪贴板内容粘贴到 .lms_cookie（整行一段即可）
+
+示例（请替换为你自己的）：
+_ga=GA1.1.xxxxxxxxx.xxxxxxxxxx; session=V2-1-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.XXXXX.0000000000000.xxxxxxxxxxxxxxxxxxxxxxxxxxx

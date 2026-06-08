@@ -1,0 +1,9 @@
+# Python 依赖
+# local_terminal_server.py 主体仅用标准库；
+# 但 web_search / fetch_url / LMS 助手依赖 requests
+requests>=2.31.0
+
+# 📸 截图功能依赖（server/screenshot.py）
+Pillow>=10.0.0
+pywin32>=306; sys_platform == 'win32'
+psutil>=5.9.0

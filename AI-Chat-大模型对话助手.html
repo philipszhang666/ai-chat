@@ -1,0 +1,1287 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Chat - 大模型对话助手</title>
+
+<!-- 数学公式渲染 -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+
+<!-- 代码高亮 -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/styles/atom-one-dark.min.css">
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/highlight.min.js"></script>
+
+<!-- 主样式 -->
+<!-- 主样式（拆分后：base 通用样式 + lms LMS 学习面板专属） -->
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="lms.css">
+<link rel="stylesheet" href="git-panel.css">
+<link rel="stylesheet" href="gemini-theme.css">
+</head>
+<body>
+
+<!-- ============ 主界面 ============ -->
+<div class="app">
+  <!-- 侧边栏 -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <div class="logo-icon">AI</div>
+        <span>Chat</span>
+      </div>
+      <button class="sidebar-collapse-btn" onclick="collapseSidebar()" title="收起侧栏">◀</button>
+    </div>
+
+    <!-- 沙箱信息：放在侧栏顶部，减少主对话区干扰 -->
+    <div class="workspace-bar sidebar-workspace" id="workspaceBar" title="AI 工具调用被限制在此目录内">
+      <div class="workspace-head">
+        <span class="workspace-icon">🛡️</span>
+        <span class="workspace-label">沙箱目录</span>
+        <span class="workspace-status" id="workspaceStatus">●</span>
+        <button class="workspace-refresh" onclick="refreshWorkspaceInfo()" title="刷新">⟳</button>
+      </div>
+      <span class="workspace-path" id="workspacePath">未连接</span>
+    </div>
+    
+    <button class="btn-new" onclick="newChat()">+ 新建对话</button>
+    
+    <div class="chat-list" id="chatList"></div>
+    
+    <!-- 侧边栏底部：设置 + 主题 -->
+    <div class="sidebar-footer">
+      <button class="icon-btn" onclick="openSettings()">⚙ 设置</button>
+    </div>
+  </aside>
+  
+  <!-- 主区域 -->
+  <main class="main">
+    <!-- 顶部工具栏 -->
+    <div class="topbar">
+      <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+      <select class="model-select" id="modelSelect" onchange="saveSettings()"></select>
+      <div class="topbar-spacer"></div>
+      <button class="topbar-btn" id="planBtn" onclick="togglePlan()" title="计划模式">📋 计划</button>
+      <button class="topbar-btn" id="outlineBtn" onclick="toggleOutline()" title="大纲模式（动态规划）">📑 大纲</button>
+      <button class="topbar-btn" id="toolsBtn" onclick="toggleTools()" title="工具调用">🛠 工具</button>
+      <button class="topbar-btn" onclick="openLmsPanel()" title="西安交大 LMS 学习助手">🎓 学习</button>
+      <button class="topbar-btn" id="traceToggleBtn" onclick="toggleTracePanel()" title="Trace 提交记录（本地）">📜 Trace</button>
+      <button class="topbar-btn" onclick="runHealthCheck()" title="上下文体检：测试 AI 是否还记得之前的对话">🧪 体检</button>
+    </div>
+    
+    <!-- Token + 频率统计栏（合并为单栏，左 Token 右 Rate） -->
+    <div class="status-bar">
+      <div class="token-stats-bar" id="tokenStats">
+        <span class="token-empty">📊 暂无对话</span>
+      </div>
+      <div class="status-bar-divider"></div>
+      <div class="rate-stats-bar" id="rateStats">
+        <span class="rate-empty">⚡ 加载中...</span>
+      </div>
+    </div>
+    
+    <!-- 消息区 -->
+    <div class="messages" id="messages">
+      <div class="messages-inner" id="messagesInner"></div>
+    </div>
+    
+    <!-- 输入区 -->
+    <div class="input-area">
+      <div class="input-inner" id="inputInner">
+        <div class="pending-atts" id="pendingAtts"></div>
+        <textarea id="input" placeholder="输入消息，Enter 发送 / Shift+Enter 换行 / 可拖拽或粘贴图片..." rows="1"></textarea>
+        <div class="input-bar">
+          <button class="input-tool" onclick="document.getElementById('imgInput').click()" title="上传图片">🖼️</button>
+          <button class="input-tool" onclick="document.getElementById('fileInput').click()" title="上传文件">📎</button>
+          <input type="file" id="imgInput" accept="image/*" multiple style="display:none" onchange="onPickImages(event)">
+          <input type="file" id="fileInput" multiple style="display:none" onchange="onPickFiles(event)">
+          <div class="input-info" id="inputInfo">准备就绪</div>
+          <button class="send-btn" id="sendBtn" onclick="onSend()">↑</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ============ Trace 侧栏（Git 风格） ============ -->
+<aside class="trace-panel" id="tracePanel">
+  <div class="trace-header">
+    <div class="trace-title">
+      <span class="trace-title-icon">📜</span>
+      <span>Trace</span>
+      <span class="trace-header-stats" id="traceHeaderStats"></span>
+    </div>
+    <button class="trace-close" onclick="closeTracePanel()" title="关闭">×</button>
+  </div>
+  <div class="trace-tabs">
+    <button class="trace-tab active" id="traceTabSession" onclick="setTraceFilter('session')">Session</button>
+    <button class="trace-tab" id="traceTabAll" onclick="setTraceFilter('all')">All</button>
+    <div class="trace-tab-spacer"></div>
+    <button class="trace-mini" onclick="exportTraces()" title="导出 JSON">⬇</button>
+    <button class="trace-mini" onclick="clearSessionTraces()" title="清空当前会话">🧹</button>
+    <button class="trace-mini" onclick="clearAllTraces()" title="清空全部">🗑</button>
+  </div>
+  <div class="trace-search">
+    <input id="traceSearchInput" placeholder="🔍 搜索 hash / 标题 / 输入输出..." oninput="renderTracePanel()">
+  </div>
+  <div class="trace-body" id="traceBody"></div>
+  <div class="trace-foot">
+    <span class="trace-foot-hint">本地记录 · 不发送给 API</span>
+  </div>
+</aside>
+
+<!-- ============ 主区域结束 ============ -->
+
+<!-- ============ 设置面板 ============ -->
+<div class="modal-mask" id="settingsModal">
+  <div class="modal wide">
+    <h2>设置 <button class="modal-close" onclick="closeSettings()">×</button></h2>
+    
+    <!-- 🗂️ API 配置档案 -->
+    <div class="form-group api-profile-box">
+      <label style="display:flex;align-items:center;gap:6px;">
+        🗂️ 配置档案
+        <span class="form-hint" style="font-weight:normal;margin:0;">保存多套 API 配置，一键切换</span>
+      </label>
+      <div style="display:flex;gap:6px;align-items:stretch;flex-wrap:wrap;">
+        <!-- 隐藏的原生 select 仅作为数据源/兼容层 -->
+        <select id="apiProfileSelect" onchange="onApiProfileSelectChange()" style="display:none;">
+          <option value="">— 未保存的临时配置 —</option>
+        </select>
+        <!-- 自定义两行下拉 -->
+        <div class="api-profile-dropdown" id="apiProfileDropdown" style="flex:1;min-width:200px;">
+          <button type="button" class="api-profile-trigger" id="apiProfileTrigger" onclick="toggleApiProfileMenu()">
+            <div class="api-profile-trigger-text" id="apiProfileTriggerText">
+              <div class="api-profile-name">— 未保存的临时配置 —</div>
+              <div class="api-profile-summary">点击选择已保存的配置</div>
+            </div>
+            <span class="api-profile-arrow">▾</span>
+          </button>
+          <div class="api-profile-menu" id="apiProfileMenu" hidden></div>
+        </div>
+        <button class="btn" type="button" onclick="onSaveAsNewProfile()" title="把当前所有 API 设置保存为一个新的配置档案">💾 另存为</button>
+        <button class="btn api-profile-op-btn" type="button" onclick="onOverwriteActiveProfile()" title="用当前设置覆盖此档案" disabled>⤴ 更新</button>
+        <button class="btn api-profile-op-btn" type="button" onclick="onRenameActiveProfile()" title="重命名" disabled>✏️</button>
+        <button class="btn api-profile-op-btn" type="button" onclick="onDuplicateActiveProfile()" title="复制一份" disabled>📋</button>
+        <button class="btn api-profile-op-btn" type="button" onclick="onDeleteActiveProfile()" title="删除此档案" disabled style="color:#d9534f;">🗑</button>
+      </div>
+      <div class="form-hint" style="margin-top:6px;">
+        💡 切换档案会自动应用 baseUrl / API Key / 模型 / 系统提示等配置。修改后点「保存」会自动同步到当前激活的档案。
+      </div>
+    </div>
+    
+    <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
+    
+    <div class="form-group">
+      <label>服务商预设</label>
+      <select id="provider" onchange="onProviderChange()">
+        <option value="openai">OpenAI</option>
+        <option value="openai_responses">OpenAI Responses</option>
+        <option value="anthropic">Anthropic Claude</option>
+        <option value="deepseek">DeepSeek</option>
+        <option value="qwen">阿里通义千问</option>
+        <option value="zhipu">智谱 AI</option>
+        <option value="custom">自定义</option>
+      </select>
+    </div>
+    
+    <div class="form-group">
+      <label>API Base URL</label>
+      <input type="text" id="baseUrl" oninput="updateUrlPreview()">
+      <div class="form-hint">基础地址，不含 /chat/completions、/responses 这部分</div>
+    </div>
+    
+    <div class="form-group">
+      <label>API 路径</label>
+      <input type="text" id="apiPath" oninput="updateUrlPreview()">
+      <div class="form-hint">OpenAI Chat: <code>/chat/completions</code>；OpenAI Responses: <code>/responses</code>；Claude: <code>/messages</code></div>
+    </div>
+    
+    <div class="form-group">
+      <label>API 格式</label>
+      <select id="apiFormat" onchange="updateUrlPreview()">
+        <option value="openai">OpenAI 兼容</option>
+        <option value="responses">OpenAI Responses</option>
+        <option value="anthropic">Anthropic 原生</option>
+      </select>
+    </div>
+    
+    <div class="form-group">
+      <label>🔗 最终请求 URL</label>
+      <div class="url-final-preview"><span class="label">POST</span><span id="finalUrlPreview">-</span></div>
+    </div>
+    
+    <div class="form-group">
+      <label>API Key</label>
+      <div class="key-wrap">
+        <input type="password" id="apiKey">
+        <button class="key-toggle" onclick="toggleKey()" id="keyToggle">显示</button>
+      </div>
+    </div>
+    
+    <div class="form-group">
+      <label style="display:flex;align-items:center;justify-content:space-between;">
+        <span>模型名称</span>
+        <button type="button" class="btn" style="padding:4px 10px;font-size:12px;" onclick="onFetchModels()">📡 拉取模型</button>
+      </label>
+      <input type="text" id="modelName" oninput="updateContextLimitModeUI()">
+      <div class="form-hint">多个用逗号分隔。点【📡 拉取模型】可从服务商自动获取可用列表</div>
+    </div>
+    
+    <div class="form-group">
+      <label>System Prompt</label>
+      <textarea id="systemPrompt" rows="3"></textarea>
+    </div>
+    
+    <div class="form-group">
+      <label>Temperature</label>
+      <div class="slider-row">
+        <input type="range" id="temperature" min="0" max="2" step="0.1" oninput="document.getElementById('tempVal').textContent=this.value">
+        <span class="slider-val" id="tempVal">0.7</span>
+      </div>
+    </div>
+    
+    <div class="form-group">
+      <label>Max Tokens</label>
+      <input type="number" id="maxTokens" min="64" max="32000">
+    </div>
+    
+    <div class="form-group">
+      <label>🛠️ 工具调用最大轮数</label>
+      <div class="slider-row">
+        <input type="range" id="maxToolRounds" min="1" max="100" step="1" oninput="document.getElementById('maxToolRoundsVal').textContent=this.value;document.getElementById('maxToolRoundsInput').value=this.value">
+        <span class="slider-val" id="maxToolRoundsVal">15</span>
+      </div>
+      <input type="number" id="maxToolRoundsInput" min="1" step="1" style="margin-top:8px;" oninput="document.getElementById('maxToolRoundsVal').textContent=this.value;document.getElementById('maxToolRounds').value=Math.max(1, Math.min(100, parseInt(this.value)||1))">
+      <div class="form-hint">单次对话中模型连续调用工具的最大轮次。一轮可包含多个并行工具。滑块最高 100，也可以直接输入更大的整数。</div>
+    </div>
+    
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+      <div><label style="margin:0;">流式输出</label></div>
+      <label class="switch"><input type="checkbox" id="streamMode"><span class="switch-slider"></span></label>
+    </div>
+
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <label style="margin:0;">AI 完成提示音</label>
+        <div class="form-hint" style="margin-top:2px;">普通对话中 AI 完整回答后播放提示音；任务队列自动任务不播放。</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="completionSoundEnabled"><span class="switch-slider"></span></label>
+    </div>
+
+    <div class="form-group">
+      <label>提示音音量</label>
+      <div class="slider-row">
+        <input type="range" id="completionSoundVolume" min="0" max="100" step="5" oninput="document.getElementById('completionSoundVolumeVal').textContent=this.value + '%'">
+        <span class="slider-val" id="completionSoundVolumeVal">80%</span>
+      </div>
+      <div class="form-hint">只影响 AI 完成提示音，不影响浏览器或系统音量。</div>
+    </div>
+    
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <label style="margin:0;">🛡️ 通过本地服务代理（绕过 CORS）</label>
+        <div class="form-hint" style="margin-top:2px;">
+          浏览器报 <code>Failed to fetch</code> / CORS 错误时开启。需先启动 <code>python local_terminal_server.py</code> 并拉取 Token。
+        </div>
+      </div>
+      <label class="switch"><input type="checkbox" id="useLocalProxy"><span class="switch-slider"></span></label>
+    </div>
+    
+    <div class="form-group">
+      <label>🔁 失败自动重试次数</label>
+      <div class="slider-row">
+        <input type="range" id="retryMaxAttempts" min="0" max="8" step="1" oninput="document.getElementById('retryMaxAttemptsVal').textContent=this.value">
+        <span class="slider-val" id="retryMaxAttemptsVal">3</span>
+      </div>
+      <div class="form-hint">网络抖动 / 5xx / 429 / 流中断时自动重发。退避策略：1s → 2s → 4s …（带随机抖动，最长 30s）</div>
+    </div>
+    
+    <!-- 上下文压缩设置 -->
+    <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
+    <h3 style="font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:6px;">🗜️ 上下文压缩</h3>
+
+    <div class="form-group" id="contextLimitSettingsGroup">
+      <label>模型上下文长度</label>
+      <div class="form-row two-cols" style="margin-bottom:0;">
+        <div>
+          <label>模式</label>
+          <select id="contextLimitMode" onchange="updateContextLimitModeUI()">
+            <option value="auto">按模型自动识别</option>
+            <option value="manual">手动指定</option>
+          </select>
+        </div>
+        <div>
+          <label>手动 token 数</label>
+          <input type="number" id="contextLimitOverride" min="1024" max="4000000" step="1000" oninput="updateContextLimitModeUI()">
+        </div>
+      </div>
+      <div class="form-hint" id="contextLimitHint">当前模型自动识别值：-</div>
+    </div>
+    
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <label style="margin:0;">自动压缩</label>
+        <div class="form-hint" style="margin-top:2px;">达到阈值时自动总结历史对话</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="compressAutoEnabled"><span class="switch-slider"></span></label>
+    </div>
+    
+    <div class="form-group">
+      <label>自动压缩阈值（上下文使用率）</label>
+      <div class="slider-row">
+        <input type="range" id="compressAutoThreshold" min="50" max="95" step="5" oninput="document.getElementById('compressThresholdVal').textContent=this.value+'%'">
+        <span class="slider-val" id="compressThresholdVal">75%</span>
+      </div>
+    </div>
+    
+    <div class="form-group">
+      <label>压缩时保留最近几条消息</label>
+      <div class="slider-row">
+        <input type="range" id="compressKeepLast" min="2" max="10" step="1" oninput="document.getElementById('compressKeepLastVal').textContent=this.value">
+        <span class="slider-val" id="compressKeepLastVal">4</span>
+      </div>
+      <div class="form-hint">最近的消息保留原样，前面的消息会被压缩成摘要</div>
+    </div>
+    
+    <!-- 🧪 自动信标（上下文体检） -->
+    <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
+    <h3 style="font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:6px;">🧪 上下文体检（自动信标）</h3>
+    
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <label style="margin:0;">启用自动信标</label>
+        <div class="form-hint" style="margin-top:2px;">每隔 N 条用户消息悄悄塞入一条"记代号"消息（不在聊天界面显示），用于检测 AI 是否还记得上下文。点击顶栏 🧪 按钮一键体检。</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="beaconEnabled"><span class="switch-slider"></span></label>
+    </div>
+    
+    <div class="form-group">
+      <label>埋点间隔（每 N 条用户消息埋一个）</label>
+      <div class="slider-row">
+        <input type="range" id="beaconInterval" min="1" max="20" step="1" oninput="document.getElementById('beaconIntervalVal').textContent=this.value">
+        <span class="slider-val" id="beaconIntervalVal">5</span>
+      </div>
+      <div class="form-hint">值越小信标越密集（监测越精细，但额外 token 越多）。每个信标约消耗 30-50 tokens。</div>
+    </div>
+    
+    <!-- 本地终端 Token 设置 -->
+    <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
+    <h3 style="font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:6px;">🔑 本地终端授权</h3>
+    
+    <div class="form-group">
+      <label>当前 Token</label>
+      <div class="key-wrap">
+        <input type="password" id="terminalTokenView" readonly placeholder="(未授权)">
+        <button class="key-toggle" onclick="toggleTerminalTokenView()" id="termTokenToggle">显示</button>
+      </div>
+      <div class="form-hint" id="terminalTokenStatus" style="margin-top:6px;">状态：—</div>
+    </div>
+    
+    <div class="form-group" style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn" type="button" onclick="onFetchTerminalToken()">🔄 重新获取 Token</button>
+      <button class="btn" type="button" onclick="onClearTerminalToken()">🗑️ 使 Token 失效</button>
+    </div>
+    <div class="form-hint">
+      Token 用于授权浏览器调用本机 <code>local_terminal_server.py</code>。<br>
+      点击「重新获取」会向本地服务请求一个新 Token，请到 Python 终端窗口按 <code>y</code> 确认。<br>
+      点击「使 Token 失效」只会清除浏览器端 —— 下次工具调用会自动重新拉取。
+    </div>
+    
+    <div id="testResult" class="test-result"></div>
+    
+    <div class="modal-footer">
+      <button class="btn" onclick="closeSettings()">取消</button>
+      <button class="btn" onclick="testConnection()">🔌 测试连接</button>
+      <button class="btn btn-primary" onclick="saveAndClose()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 📡 拉取模型 - 选择列表 ============ -->
+<div class="modal-mask" id="fetchModelsModal">
+  <div class="modal">
+    <h2>📡 选择要添加的模型 <button class="modal-close" onclick="closeFetchModelsModal()">×</button></h2>
+    
+    <div id="fetchModelsHint" class="json-help" style="display:none;"></div>
+    
+    <div class="form-group" style="display:flex;gap:8px;align-items:center;">
+      <input type="text" id="fetchModelsFilter" placeholder="🔍 过滤模型名（支持关键词）" 
+             oninput="filterFetchModels()"
+             style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;">
+      <button class="btn" type="button" onclick="toggleSelectAllFetchModels()" id="fetchModelsSelAllBtn">全选</button>
+    </div>
+    
+    <div class="form-hint" id="fetchModelsCount" style="margin:6px 0 10px;">共 0 个</div>
+    
+    <div id="fetchModelsList" 
+         style="max-height:55vh;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg);">
+      <div style="text-align:center;color:var(--text-secondary);padding:20px;">加载中…</div>
+    </div>
+    
+    <div class="modal-footer">
+      <button class="btn" onclick="closeFetchModelsModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmAddFetchedModels()">✅ 添加选中</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 计划模式设置 ============ -->
+<div class="modal-mask" id="planModal">
+  <div class="modal wide">
+    <h2>📋 计划模式 <button class="modal-close" onclick="closePlanSettings()">×</button></h2>
+    
+    <div class="json-help">
+      💡 <strong>流程</strong>：① AI 生成执行计划（工具开启时可先侦察项目）→ ② 老师评审计划 → ③ 规划者根据意见修订 → ④ 按计划逐步执行 → ⑤ 整合输出 → ⑥ 独立老师验证结果。<br>
+      <strong>适合</strong>：复杂任务（写报告、研究、多步推理、代码项目等）。<br>
+      ⚠️ 调用 LLM 多次，成本较高。
+    </div>
+    
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+      <div><label style="margin:0;">启用计划模式</label></div>
+      <label class="switch"><input type="checkbox" id="plan_enabled"><span class="switch-slider"></span></label>
+    </div>
+    
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+      <div><label style="margin:0;">老师评审计划</label><div class="form-hint" style="margin-top:2px;">让老师审查并改进计划（推荐）</div></div>
+      <label class="switch"><input type="checkbox" id="plan_review"><span class="switch-slider"></span></label>
+    </div>
+    
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+      <div><label style="margin:0;">最终整合输出</label><div class="form-hint" style="margin-top:2px;">把步骤结果整合（关闭则直接拼接）</div></div>
+      <label class="switch"><input type="checkbox" id="plan_synthesize"><span class="switch-slider"></span></label>
+    </div>
+
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+      <div><label style="margin:0;">老师最终验证</label><div class="form-hint" style="margin-top:2px;">执行完成后由独立老师基于任务、方案和结果验证，可自主调用工具</div></div>
+      <label class="switch"><input type="checkbox" id="plan_verify"><span class="switch-slider"></span></label>
+    </div>
+    
+    <div class="form-group">
+      <label>步骤数上限</label>
+      <div class="slider-row">
+        <input type="range" id="plan_maxSteps" min="2" max="10" step="1" oninput="document.getElementById('planMaxStepsVal').textContent=this.value">
+        <span class="slider-val" id="planMaxStepsVal">5</span>
+      </div>
+    </div>
+    
+    <div class="form-group">
+      <label>评审最大轮数</label>
+      <div class="slider-row">
+        <input type="range" id="plan_reviewRounds" min="1" max="3" step="1" oninput="document.getElementById('planReviewRoundsVal').textContent=this.value">
+        <span class="slider-val" id="planReviewRoundsVal">2</span>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>最终验证最大轮数</label>
+      <div class="slider-row">
+        <input type="range" id="plan_verifyRounds" min="1" max="5" step="1" oninput="document.getElementById('planVerifyRoundsVal').textContent=this.value">
+        <span class="slider-val" id="planVerifyRoundsVal">2</span>
+      </div>
+      <div class="form-hint">每轮未通过后，需要你手动决定是否追加改进阶段；不会自动重跑原步骤。</div>
+    </div>
+    
+    <div class="form-group">
+      <label>规划模型</label>
+      <input type="text" id="plan_plannerModel" placeholder="留空用主模型">
+    </div>
+    
+    <div class="form-group">
+      <label>执行模型</label>
+      <input type="text" id="plan_executorModel" placeholder="留空用主模型">
+    </div>
+
+    <div class="form-group">
+      <label>最终验证模型</label>
+      <input type="text" id="plan_verifierModel" placeholder="留空用主模型">
+    </div>
+    
+    <div class="form-group">
+      <label>预设场景</label>
+      <div class="preset-grid">
+        <div class="preset-card" onclick="applyPlanPreset('general')"><strong>📚 通用</strong><span>通用任务拆解</span></div>
+        <div class="preset-card" onclick="applyPlanPreset('research')"><strong>🔬 研究</strong><span>多角度研究</span></div>
+        <div class="preset-card" onclick="applyPlanPreset('writing')"><strong>✍️ 写作</strong><span>分章节写作</span></div>
+        <div class="preset-card" onclick="applyPlanPreset('code')"><strong>💻 代码</strong><span>设计+实现</span></div>
+        <div class="preset-card" onclick="applyPlanPreset('problem')"><strong>🧩 解题</strong><span>多步推理</span></div>
+        <div class="preset-card" onclick="applyPlanPreset('teaching')"><strong>👨‍🏫 教学</strong><span>循序渐进</span></div>
+      </div>
+    </div>
+    
+    <div class="form-group">
+      <label>规划者 Prompt</label>
+      <textarea id="plan_plannerPrompt" rows="6"></textarea>
+    </div>
+    
+    <div class="form-group">
+      <label>执行者 Prompt</label>
+      <textarea id="plan_executorPrompt" rows="3"></textarea>
+    </div>
+    
+    <div class="modal-footer">
+      <button class="btn" onclick="closePlanSettings()">取消</button>
+      <button class="btn btn-primary" onclick="savePlanSettings()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 📑 大纲模式设置 ============ -->
+<div class="modal-mask" id="outlineModal">
+  <div class="modal wide">
+    <h2>📑 大纲模式 - 动态规划 <button class="modal-close" onclick="closeOutlineSettings()">×</button></h2>
+    
+    <div class="json-help">
+      💡 <strong>机制</strong>：AI 在单一上下文中边做边维护一份"工作大纲"，发现新需求会动态追加条目，全程使用工具。<br>
+      <strong>与计划模式的区别</strong>：计划模式是"先规划→人审批→分步执行"的瀑布式；大纲是"自主探索 + 动态调整"的敏捷式。<br>
+      <strong>适合</strong>：探索性任务、代码调试、需要边做边发现的工作。<br>
+      ⚠️ 强依赖工具调用能力，请确保已加载至少一个工具。
+    </div>
+    
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+      <div><label style="margin:0;">启用大纲模式</label><div class="form-hint" style="margin-top:2px;">启用后会自动关闭计划模式 / 师生模式</div></div>
+      <label class="switch"><input type="checkbox" id="outline_enabled"><span class="switch-slider"></span></label>
+    </div>
+    
+    <div class="form-group">
+      <label>最大执行轮数</label>
+      <input type="number" id="outline_maxRounds" min="1" step="1" placeholder="30">
+      <div class="form-hint">每次 LLM 调用算一轮。受您的请求频率限制保护，超限自动等待。</div>
+    </div>
+    
+    <div class="form-group">
+      <label>使用的模型</label>
+      <input type="text" id="outline_model" placeholder="留空使用主模型">
+      <div class="form-hint">大纲模式需要良好的 function calling 能力，建议用 GPT-4o / Claude Sonnet / DeepSeek-Chat 等</div>
+    </div>
+    
+    <div class="form-group">
+      <label>系统提示词</label>
+      <textarea id="outline_systemPrompt" rows="10" placeholder="留空则使用默认提示词"></textarea>
+      <div class="form-hint">指导 AI 如何使用 save_outline / append_outline / update_outline 三个工具维护大纲。</div>
+      <button class="btn" style="margin-top:6px;" onclick="resetOutlinePrompt()">🔄 恢复默认</button>
+    </div>
+    
+    <div class="modal-footer">
+      <button class="btn" onclick="closeOutlineSettings()">取消</button>
+      <button class="btn btn-primary" onclick="saveOutlineSettings()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 师生讨论设置 ============ -->
+<div class="modal-mask" id="reflectionModal">
+  <div class="modal wide">
+    <h2>🎭 师生讨论模式 <button class="modal-close" onclick="closeReflectionSettings()">×</button></h2>
+    
+    <div class="json-help">
+      💡 学生先答 → 老师评审 → 学生改进 → 循环。用户看到的是最终答案，可展开过程。
+    </div>
+    
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+      <div><label style="margin:0;">启用师生讨论</label></div>
+      <label class="switch"><input type="checkbox" id="ref_enabled"><span class="switch-slider"></span></label>
+    </div>
+    
+    <div class="form-group">
+      <label>最大轮数</label>
+      <div class="slider-row">
+        <input type="range" id="ref_rounds" min="1" max="5" step="1" oninput="document.getElementById('refRoundsVal').textContent=this.value">
+        <span class="slider-val" id="refRoundsVal">3</span>
+      </div>
+    </div>
+    
+    <div class="form-group">
+      <label>满意分数（达到此分提前结束）</label>
+      <div class="slider-row">
+        <input type="range" id="ref_minScore" min="6" max="10" step="1" oninput="document.getElementById('refScoreVal').textContent=this.value">
+        <span class="slider-val" id="refScoreVal">9</span>
+      </div>
+    </div>
+    
+    <div class="form-group">
+      <label>学生模型</label>
+      <input type="text" id="ref_studentModel" placeholder="留空用主模型">
+    </div>
+    
+    <div class="form-group">
+      <label>老师模型</label>
+      <input type="text" id="ref_teacherModel" placeholder="留空用主模型">
+    </div>
+    
+    <!-- 🔧 工具调用设置 -->
+    <div class="form-group" style="border-top:1px dashed var(--border);padding-top:12px;margin-top:12px;">
+      <label style="display:block;margin-bottom:8px;font-weight:600;">🔧 工具调用</label>
+      <div class="json-help" style="margin-bottom:10px;">
+        允许学生 / 老师在回答前调用工具完成任务或验证结果。需先在"工具管理"里启用工具并定义至少一个工具。
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <label style="margin:0;font-weight:400;">学生可调用工具</label>
+        <label class="switch"><input type="checkbox" id="ref_studentUseTools" checked><span class="switch-slider"></span></label>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+        <label style="margin:0;font-weight:400;font-size:12px;flex:1;">学生单轮最多工具循环数</label>
+        <input type="number" id="ref_studentMaxToolRounds" min="1" max="50" value="15" style="width:80px;">
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <label style="margin:0;font-weight:400;">老师可调用工具（独立验证）</label>
+        <label class="switch"><input type="checkbox" id="ref_teacherUseTools" checked><span class="switch-slider"></span></label>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <label style="margin:0;font-weight:400;font-size:12px;flex:1;">老师单轮最多工具循环数</label>
+        <input type="number" id="ref_teacherMaxToolRounds" min="1" max="50" value="5" style="width:80px;">
+      </div>
+    </div>
+    
+    <div class="form-group">
+      <label>预设</label>
+      <div class="preset-grid">
+        <div class="preset-card" onclick="applyPreset('general')"><strong>📚 通用</strong><span>全面审查</span></div>
+        <div class="preset-card" onclick="applyPreset('code')"><strong>💻 代码</strong><span>关注正确性</span></div>
+        <div class="preset-card" onclick="applyPreset('writing')"><strong>✍️ 写作</strong><span>关注文笔</span></div>
+        <div class="preset-card" onclick="applyPreset('math')"><strong>🧮 数学</strong><span>严格检查</span></div>
+        <div class="preset-card" onclick="applyPreset('analysis')"><strong>🔬 分析</strong><span>多视角</span></div>
+        <div class="preset-card" onclick="applyPreset('translation')"><strong>🌐 翻译</strong><span>信达雅</span></div>
+      </div>
+    </div>
+    
+    <div class="form-group">
+      <label>学生 Prompt</label>
+      <textarea id="ref_studentPrompt" rows="3"></textarea>
+    </div>
+    
+    <div class="form-group">
+      <label>老师 Prompt</label>
+      <textarea id="ref_teacherPrompt" rows="6"></textarea>
+    </div>
+    
+    <div class="modal-footer">
+      <button class="btn" onclick="closeReflectionSettings()">取消</button>
+      <button class="btn btn-primary" onclick="saveReflectionSettings()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MCP / Skill 设置 ============ -->
+<div class="modal-mask" id="mcpSkillModal">
+  <div class="modal wide">
+    <h2>🔌 MCP / Skill <button class="modal-close" onclick="closeMcpSkillSettings()">×</button></h2>
+    
+    <div class="json-help">
+      MCP 服务器会同步成普通工具；Skill 会以目录摘要追加到系统提示中，全文由 read_skill 按需读取。当前 MCP 支持 stdio server。
+    </div>
+    
+    <div class="json-tabs">
+      <button class="json-tab mcp-skill-tab active" data-tab="mcp" onclick="switchMcpSkillTab('mcp')">🔌 MCP 服务器</button>
+      <button class="json-tab mcp-skill-tab" data-tab="skills" onclick="switchMcpSkillTab('skills')">📚 Skill</button>
+    </div>
+    
+    <div class="mcp-skill-pane" data-pane="mcp">
+      <div style="display:grid;grid-template-columns:minmax(260px,1fr) minmax(260px,1fr);gap:14px;align-items:start;">
+        <div>
+          <h3 style="font-size:14px;margin:0 0 10px;">已配置服务器</h3>
+          <div id="mcpServerList"></div>
+          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="syncMcpTools()">🔄 同步 MCP 工具到工具列表</button>
+            <button class="btn" onclick="openTools()">查看工具管理</button>
+          </div>
+          <pre id="mcpSyncResult" style="white-space:pre-wrap;background:var(--bg-input);border-radius:6px;padding:8px;min-height:52px;max-height:180px;overflow:auto;font-size:12px;margin-top:10px;color:var(--text-secondary);"></pre>
+        </div>
+        
+        <div>
+          <h3 id="mcpServerFormTitle" style="font-size:14px;margin:0 0 10px;">添加 MCP 服务器</h3>
+          <input type="hidden" id="mcpServerId">
+          <div class="form-group">
+            <label>名称</label>
+            <input type="text" id="mcpServerName" placeholder="filesystem">
+          </div>
+          <div class="form-group">
+            <label>Command</label>
+            <input type="text" id="mcpServerCommand" placeholder="npx / node / python">
+          </div>
+          <div class="form-group">
+            <label>Args（每行一个参数）</label>
+            <textarea id="mcpServerArgs" rows="4" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;."></textarea>
+          </div>
+          <div class="form-group">
+            <label>CWD（留空 = 当前沙箱根目录）</label>
+            <input type="text" id="mcpServerCwd" placeholder=".">
+          </div>
+          <div class="form-group">
+            <label>Env（JSON 或 KEY=VALUE，每行一个）</label>
+            <textarea id="mcpServerEnv" rows="4" placeholder='{"API_KEY":"..."}'></textarea>
+          </div>
+          <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+            <label style="margin:0;">启用</label>
+            <label class="switch"><input type="checkbox" id="mcpServerEnabled" checked><span class="switch-slider"></span></label>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="saveMcpServer()">保存服务器</button>
+            <button class="btn" onclick="clearMcpServerForm()">清空表单</button>
+          </div>
+          <div class="form-hint" style="margin-top:8px;">
+            服务器进程由本地后端启动。同步和调用 MCP 工具时会走“权限管理”里的 MCP 服务器确认。
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="mcp-skill-pane" data-pane="skills" style="display:none;">
+      <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <label style="margin:0;">启用 Skill 目录摘要</label>
+          <div class="form-hint">勾选的 Skill 只追加摘要到 System Prompt；需要全文时由 read_skill 工具按路径读取。</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="skillUseEnabled" checked onchange="saveSkillRootsFromUi()"><span class="switch-slider"></span></label>
+      </div>
+      <div class="form-group">
+        <label>Skill 根目录（每行一个，支持相对沙箱路径）</label>
+        <textarea id="skillRootsText" rows="4" placeholder="skill"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <button class="btn btn-primary" onclick="scanSkills()">🔍 扫描 Skill</button>
+        <button class="btn" onclick="saveSkillRootsFromUi()">保存设置</button>
+      </div>
+      <pre id="skillScanResult" style="white-space:pre-wrap;background:var(--bg-input);border-radius:6px;padding:8px;min-height:40px;max-height:120px;overflow:auto;font-size:12px;color:var(--text-secondary);"></pre>
+      <div id="skillList" style="margin-top:10px;"></div>
+    </div>
+    
+    <div class="modal-footer">
+      <button class="btn" onclick="closeMcpSkillSettings()">关闭</button>
+      <button class="btn btn-primary" onclick="closeMcpSkillSettings()">保存并完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 项目记忆 ============ -->
+<div class="modal-mask" id="projectMemoryModal">
+  <div class="modal wide">
+    <h2>🧠 项目记忆 <button class="modal-close" onclick="closeProjectMemorySettings()">×</button></h2>
+    <div class="json-help" style="margin-bottom:12px;">
+      项目记忆用于记录当前工作区的长期背景。关闭时不会读取、生成或注入任何项目记忆。
+    </div>
+
+    <div class="project-memory-toggle-row">
+      <div>
+        <div class="project-memory-toggle-title">启用项目记忆</div>
+        <div class="form-hint">开启后才会检测当前项目是否存在记忆文件；不存在时会询问是否生成草稿。</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="projectMemoryEnabled"><span class="switch-slider"></span></label>
+    </div>
+
+    <div class="form-row two-cols">
+      <div>
+        <label>记忆文件路径</label>
+        <input type="text" id="projectMemoryPath" placeholder=".agent/memory.md">
+        <div class="form-hint">相对于当前 workspace。建议保持默认路径。</div>
+      </div>
+      <div>
+        <label>注入最大字符数</label>
+        <input type="number" id="projectMemoryMaxChars" min="1000" step="1000">
+        <div class="form-hint">超过上限会截断后注入，避免占用过多上下文。</div>
+      </div>
+    </div>
+
+    <div class="project-memory-meta">
+      <span>当前 workspace：</span>
+      <code id="projectMemoryWorkspace">尚未检测</code>
+    </div>
+    <div id="projectMemoryStatus" class="project-memory-status"></div>
+
+    <div class="form-group">
+      <label>项目记忆内容</label>
+      <textarea id="projectMemoryContent" rows="16" placeholder="开启后可读取或生成 .agent/memory.md"></textarea>
+    </div>
+
+    <div class="modal-footer" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="saveProjectMemorySettingsFromUi()">保存设置</button>
+      <button class="btn" onclick="initProjectMemory(true)">检测/读取</button>
+      <button class="btn" onclick="generateProjectMemoryDraft()">生成/刷新草稿</button>
+      <button class="btn btn-primary" onclick="saveProjectMemoryFromUi()">保存到项目</button>
+      <button class="btn" onclick="clearLoadedProjectMemory()">卸载当前记忆</button>
+      <button class="btn" onclick="closeProjectMemorySettings()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 工具管理 ============ -->
+<div class="modal-mask" id="toolsModal">
+  <div class="modal wide">
+    <h2>🛠 工具管理 <button class="modal-close" onclick="closeTools()">×</button></h2>
+    
+    <div class="json-help">💡 添加工具 → 工具栏启用 → AI 自动调用</div>
+    
+    <div class="form-group">
+      <label>预设工具：</label>
+      <div>
+        <span class="tool-preset" onclick="addPresetTool('time')">⏰ 时间</span>
+        <span class="tool-preset" onclick="addPresetTool('calc')">🧮 计算器</span>
+        <span class="tool-preset" onclick="addPresetTool('weather')">☁️ 天气</span>
+        <span class="tool-preset" onclick="addPresetTool('random')">🎲 随机数</span>
+        <span class="tool-preset" onclick="addPresetTool('search')">🔍 搜索</span>
+        <span class="tool-preset" onclick="addPresetTool('fetch')">🌐 HTTP</span>
+      </div>
+    </div>
+    
+    <div id="toolList"></div>
+    <button class="tool-add-btn" onclick="addCustomTool()">+ 添加自定义工具</button>
+    
+    <div class="modal-footer">
+      <button class="btn" id="lmsToggleBtn" onclick="toggleLmsTools()">🎓 启用 LMS 工具</button>
+      <button class="btn" id="gitToggleBtn" onclick="toggleGitTools()">💾 启用快照工具</button>
+      <button class="btn" id="paperToggleBtn" onclick="togglePaperTools()">📚 启用论文工具</button>
+      <button class="btn" onclick="resetBuiltinTools()">🔄 恢复内置工具</button>
+      <button class="btn btn-warning" onclick="clearAllTools()">🗑 清空全部</button>
+      <button class="btn btn-primary" onclick="closeTools()">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 工具编辑 ============ -->
+<div class="modal-mask" id="toolEditModal">
+  <div class="modal wide">
+    <h2>编辑工具 <button class="modal-close" onclick="document.getElementById('toolEditModal').classList.remove('show')">×</button></h2>
+    
+    <div class="form-group"><label>名称（英文）</label><input type="text" id="te_name"></div>
+    <div class="form-group"><label>描述</label><textarea id="te_desc" rows="2"></textarea></div>
+    <div class="form-group"><label>参数 Schema</label><textarea class="json-editor" id="te_params" style="min-height:140px;"></textarea></div>
+    <div class="form-group"><label>执行代码（JS）</label><textarea class="json-editor" id="te_code" style="min-height:160px;"></textarea></div>
+    
+    <div class="modal-footer">
+      <button class="btn" onclick="document.getElementById('toolEditModal').classList.remove('show')">取消</button>
+      <button class="btn btn-primary" onclick="saveToolEdit()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ JSON 请求查看器 ============ -->
+<div class="modal-mask" id="jsonEditorModal">
+  <div class="modal wide">
+    <h2>
+      <span>{ } 请求 JSON 查看器</span>
+      <button class="modal-close" onclick="closeJsonEditor()">×</button>
+    </h2>
+    
+    <div class="json-tabs">
+      <button class="json-tab active" data-jsontab="preview" onclick="switchJsonTab('preview', this)">🔍 实时预览</button>
+      <button class="json-tab" data-jsontab="response" onclick="switchJsonTab('response', this)">📥 AI 响应</button>
+      <button class="json-tab" data-jsontab="template" onclick="switchJsonTab('template', this)">📝 自定义模板</button>
+      <button class="json-tab" data-jsontab="headers" onclick="switchJsonTab('headers', this)">📋 自定义请求头</button>
+      <button class="json-tab" data-jsontab="history" onclick="switchJsonTab('history', this)">📜 请求历史</button>
+    </div>
+    
+    <!-- Tab 1: 实时预览 -->
+    <div id="jsonTab-preview">
+      <div class="json-help">
+        💡 显示当前会话<strong>实际发送的 JSON</strong>（包含工具、附件、摘要等所有内容）。<br>
+        敏感字段（API Key）已用 *** 隐藏。
+      </div>
+      <div class="json-stats" id="jsonStats" style="margin-bottom:8px;font-size:12px;color:var(--text-secondary);"></div>
+      <textarea class="json-editor" id="jsonPreview" readonly style="min-height:380px;"></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+        <button class="btn" onclick="refreshJsonPreview()">🔄 刷新</button>
+        <button class="btn" onclick="copyJsonPreview()">📋 复制完整内容</button>
+        <button class="btn" onclick="copyJsonBodyOnly()">📦 仅复制 body</button>
+        <button class="btn" onclick="copyAsCurl()">⚡ 复制为 cURL</button>
+      </div>
+    </div>
+    
+    <!-- Tab 2: AI 响应（原始 JSON / SSE）-->
+    <div id="jsonTab-response" style="display:none;">
+      <div class="json-help">
+        💡 显示最近 10 次 LLM 调用的<strong>完整请求体 + 完整响应体</strong>（含主对话、计划模式、大纲、师生、压缩摘要等所有调用）。<br>
+        请求头中的 API Key 已自动脱敏；流式响应保留原始 SSE 字节流。⚠️ 仅当前浏览会话有效，刷新页面后清空。
+      </div>
+      <div class="resp-container">
+        <div class="resp-list" id="jsonResponseList"></div>
+        <div class="resp-detail">
+          <div class="resp-meta" id="jsonResponseMeta"></div>
+          <textarea class="json-editor" id="jsonResponseDetail" readonly style="min-height:400px;"></textarea>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+        <button class="btn" onclick="refreshJsonResponse()">🔄 刷新</button>
+        <button class="btn" onclick="copyJsonResponse()">📋 复制内容</button>
+        <button class="btn btn-warning" onclick="clearJsonResponses()">🗑 清空</button>
+      </div>
+    </div>
+    
+    <!-- Tab 2: 自定义模板 -->
+    <div id="jsonTab-template" style="display:none;">
+      <div class="json-help">
+        💡 可以自定义请求体模板。支持占位符：<br>
+        <code>{{messages}}</code> <code>{{model}}</code> <code>{{system}}</code>
+        <code>{{temperature}}</code> <code>{{max_tokens}}</code>
+        <code>{{stream}}</code> <code>{{tools}}</code>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding:8px 12px;background:var(--bg-input);border-radius:8px;">
+        <label style="font-size:13px;">启用自定义模板（覆盖默认请求体）</label>
+        <label class="switch"><input type="checkbox" id="jsonUseCustom"><span class="switch-slider"></span></label>
+      </div>
+      <textarea class="json-editor" id="jsonTemplate" style="min-height:300px;"></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+        <button class="btn" onclick="formatJsonTemplate()">✨ 格式化</button>
+        <button class="btn btn-warning" onclick="resetJsonTemplate()">🔄 恢复默认</button>
+        <button class="btn btn-primary" onclick="saveJsonTemplate()">💾 保存</button>
+      </div>
+    </div>
+    
+    <!-- Tab 3: 自定义请求头 -->
+    <div id="jsonTab-headers" style="display:none;">
+      <div class="json-help">
+        💡 额外的请求头（JSON 格式）。默认会自动添加 Content-Type 和 Authorization。<br>
+        覆盖 <code>User-Agent</code> 这类浏览器禁止直连设置的请求头时，请开启「通过本地服务代理」。
+      </div>
+      <textarea class="json-editor" id="jsonHeaders" style="min-height:200px;" placeholder='{"User-Agent": "codex-tui/0.118.0 (Mac OS 26.3.1; arm64)"}'></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+        <button class="btn" onclick="setCodexUserAgentHeader()">🧩 填入 Codex UA</button>
+        <button class="btn btn-primary" onclick="saveJsonTemplate()">💾 保存</button>
+      </div>
+    </div>
+    
+    <!-- Tab 4: 请求历史 -->
+    <div id="jsonTab-history" style="display:none;">
+      <div class="json-help">
+        💡 最近 20 次 API 请求记录。可查看请求体、响应、错误，方便调试。
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <button class="btn" onclick="refreshJsonHistory()">🔄 刷新</button>
+        <button class="btn btn-warning" onclick="clearJsonHistory()">🗑 清空历史</button>
+      </div>
+      <div id="jsonHistory" style="max-height:480px;overflow-y:auto;"></div>
+    </div>
+    
+    <div class="modal-footer" style="margin-top:16px;">
+      <button class="btn" onclick="closeJsonEditor()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 备份与恢复 ============ -->
+<div class="modal-mask" id="backupModal">
+  <div class="modal wide">
+    <h2>💾 备份与恢复 <button class="modal-close" onclick="closeBackup()">×</button></h2>
+    
+    <div class="backup-lede">
+      <div>
+        <strong>备份范围</strong>
+        <span>导出为 JSON，用于迁移配置、恢复工具和保留长工具输出归档。</span>
+      </div>
+      <div class="backup-lede-note">API Key 和对话历史可能包含敏感信息。</div>
+    </div>
+    
+    <h3 style="font-size:15px;margin:18px 0 10px;">📤 导出</h3>
+    <div class="form-group">
+      <label>导出内容</label>
+      <div class="backup-options">
+        <div class="backup-option-section">
+          <div class="backup-section-title">配置</div>
+          <label class="backup-check"><input type="checkbox" id="exp_settings" checked><span><strong>基础设置</strong><em>当前 API、模型、上下文、压缩和全局偏好</em></span></label>
+          <label class="backup-check sensitive"><input type="checkbox" id="exp_apiKey" checked><span><strong>API Key</strong><em>敏感；不勾选会清空导出的 key</em></span></label>
+          <label class="backup-check"><input type="checkbox" id="exp_apiProfiles" checked><span><strong>API 配置档案</strong><em>多套 API Profile、当前激活档案</em></span></label>
+        </div>
+        <div class="backup-option-section">
+          <div class="backup-section-title">Agent 数据</div>
+          <label class="backup-check"><input type="checkbox" id="exp_tools" checked><span><strong>工具</strong><em>自定义工具 schema 和执行代码</em></span></label>
+          <label class="backup-check"><input type="checkbox" id="exp_toolArtifacts" checked><span><strong>工具输出归档</strong><em>长 tool 输出全文；用于恢复 artifact_id 可读性</em></span></label>
+          <label class="backup-check"><input type="checkbox" id="exp_chats"><span><strong>对话历史</strong><em>默认关闭，可能很大且含隐私内容</em></span></label>
+        </div>
+        <div class="backup-option-section">
+          <div class="backup-section-title">模式设置</div>
+          <label class="backup-check compact"><input type="checkbox" id="exp_plan" checked><span><strong>计划模式</strong></span></label>
+          <label class="backup-check compact"><input type="checkbox" id="exp_reflection" checked><span><strong>师生设置</strong></span></label>
+          <label class="backup-check compact"><input type="checkbox" id="exp_outline" checked><span><strong>大纲设置</strong></span></label>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer backup-export-actions" style="margin-top:10px;justify-content:flex-start;">
+      <button class="btn btn-primary" onclick="exportConfig()">📥 下载</button>
+      <button class="btn" onclick="copyConfigToClipboard()">📋 复制</button>
+    </div>
+    
+    <hr style="margin:20px 0;border:none;border-top:1px solid var(--border);">
+    
+    <h3 style="font-size:15px;margin:0 0 10px;">📥 导入</h3>
+    <div class="form-group">
+      <label>从文件</label>
+      <input type="file" id="importFile" accept=".json" onchange="importFromFile(event)">
+    </div>
+    <div class="form-group">
+      <label>或粘贴 JSON</label>
+      <textarea class="json-editor" id="importText" placeholder="粘贴 JSON 配置..." style="min-height:140px;"></textarea>
+    </div>
+    <div class="form-group">
+      <label>导入选项</label>
+      <div class="backup-options">
+        <div class="backup-option-section">
+          <div class="backup-section-title">配置</div>
+          <label class="backup-check"><input type="checkbox" id="imp_settings" checked><span><strong>基础设置</strong><em>合并到当前设置，保留当前主题</em></span></label>
+          <label class="backup-check"><input type="checkbox" id="imp_apiProfiles" checked><span><strong>API 配置档案</strong><em>新增档案；已有 id 跳过，同名自动重命名</em></span></label>
+        </div>
+        <div class="backup-option-section">
+          <div class="backup-section-title">Agent 数据</div>
+          <label class="backup-check"><input type="checkbox" id="imp_tools" checked><span><strong>工具</strong><em>新增需确认；同名可覆盖、跳过或逐个询问</em></span></label>
+          <label class="backup-check"><input type="checkbox" id="imp_toolArtifacts" checked><span><strong>工具输出归档</strong><em>按 artifact_id 合并，已有归档跳过</em></span></label>
+          <label class="backup-check"><input type="checkbox" id="imp_chats"><span><strong>对话</strong><em>插入到当前对话列表前面</em></span></label>
+        </div>
+        <div class="backup-option-section">
+          <div class="backup-section-title">模式设置</div>
+          <label class="backup-check compact"><input type="checkbox" id="imp_plan" checked><span><strong>计划模式</strong></span></label>
+          <label class="backup-check compact"><input type="checkbox" id="imp_reflection" checked><span><strong>师生</strong></span></label>
+          <label class="backup-check compact"><input type="checkbox" id="imp_outline" checked><span><strong>大纲</strong></span></label>
+        </div>
+      </div>
+    </div>
+    <div id="importPreview" class="test-result"></div>
+    <div class="modal-footer">
+      <button class="btn btn-warning" onclick="resetAllData()">🗑 清空所有</button>
+      <button class="btn" onclick="closeBackup()">关闭</button>
+      <button class="btn btn-primary" onclick="applyImport()">✅ 应用导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 权限管理面板 ============ -->
+<div class="modal-mask" id="permissionsModal">
+  <div class="modal">
+    <h2>🔐 工具权限管理 <button class="modal-close" onclick="closePermissions()">×</button></h2>
+    
+    <div class="json-help">
+      💡 勾选「永久允许」后，AI 调用该类操作将不再弹窗。<br>
+      取消勾选即撤销授权，下次调用会重新弹窗确认。<br>
+      只读操作（读文件 / 列目录 / 搜索 / 文件信息）始终不需要授权。
+    </div>
+    
+    <div id="permissionsList" class="perm-list"></div>
+    
+    <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);">
+    
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+        <span>📋 本任务临时允许（任务结束自动清除）</span>
+      </label>
+      <div id="taskPermissionsList" class="perm-task-list" style="margin-top:8px;font-size:12px;color:var(--text-secondary);"></div>
+    </div>
+    
+    <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);">
+
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--danger,#d9534f);">
+        <span>🚨 危险区：一键清除本地敏感凭证</span>
+      </label>
+      <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;line-height:1.5;">
+        包括：API Key、LMS Cookie、本地终端 Token、终端永久授权。<br>
+        共用电脑、归还设备、或怀疑凭证泄漏时使用。<strong>不会删除</strong>聊天记录和工具配置。
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn" onclick="onClearAllPerms()">🗑️ 清空所有永久授权</button>
+      <button class="btn" style="color:var(--danger,#d9534f);border-color:var(--danger,#d9534f);" onclick="onClearAllSecrets()">🚨 清除所有凭证</button>
+      <button class="btn btn-primary" onclick="closePermissions()">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 终端命令确认弹窗 ============ -->
+<div class="term-confirm-mask" id="termConfirmMask">
+  <div class="term-confirm">
+    <div class="term-confirm-header">
+      <span class="icon">⚠️</span>
+      <span>AI 想在你的终端执行命令</span>
+    </div>
+    <div class="term-confirm-body">
+      <div class="term-confirm-label">📂 工作目录</div>
+      <div class="term-confirm-cwd" id="termConfirmCwd">-</div>
+      
+      <div class="term-confirm-label">💻 即将执行的操作</div>
+      <div class="term-confirm-cmd" id="termConfirmCmd"></div>
+      
+      <div class="term-confirm-warn" id="termConfirmWarn" style="display:none;">
+        <span>⚠️</span>
+        <span id="termConfirmWarnText"></span>
+      </div>
+      
+      <div class="term-confirm-options">
+        <label>
+          <input type="checkbox" id="termAllowSession">
+          <span>永久允许「<span id="termConfirmCategoryLabel">此类操作</span>」（可在 ⋯ 更多 → 权限管理 撤销）</span>
+        </label>
+      </div>
+    </div>
+    <div class="term-confirm-footer">
+      <button class="term-btn deny" onclick="termConfirmReject()">❌ 仅拒绝此次</button>
+      <button class="term-btn deny" onclick="termConfirmRejectAll()">🛑 拒绝并停止</button>
+      <button class="term-btn allow" onclick="termConfirmAccept()" id="termAllowBtn">
+        ✅ 允许执行 <span class="term-countdown" id="termCountdown"></span>
+      </button>
+      <button class="term-btn allow-always" onclick="termConfirmAcceptAll()" id="termAllowTaskBtn">⚡ 本任务后续允许此类</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 图片预览大图 ============ -->
+<div class="img-preview-mask" id="imgPreview" onclick="this.classList.remove('show')">
+  <img id="imgPreviewSrc" src="">
+</div>
+
+<!-- ============ Toast ============ -->
+<div class="toast" id="toast"></div>
+
+<!-- ============ 统一设置页 ============ -->
+<div class="settings-page" id="settingsPage" aria-hidden="true">
+  <aside class="settings-page-nav">
+    <div class="settings-page-brand">
+      <div class="logo-icon"></div>
+      <div>
+        <div class="settings-page-title">设置</div>
+        <div class="settings-page-sub">AI Chat</div>
+      </div>
+    </div>
+    <button class="settings-nav-item active" data-settings-section="main" data-desc="管理 API、模型、上下文、代理和本地授权。" onclick="openSettingsSection('main')"><span>⚙</span><span>主设置</span></button>
+    <button class="settings-nav-item" data-settings-section="plan" data-desc="配置先规划、评审、执行和验证的多阶段工作流。" onclick="openSettingsSection('plan')"><span>📋</span><span>计划模式</span></button>
+    <button class="settings-nav-item" data-settings-section="outline" data-desc="配置动态大纲和自主探索式任务执行。" onclick="openSettingsSection('outline')"><span>📑</span><span>大纲模式</span></button>
+    <button class="settings-nav-item" data-settings-section="reflection" data-desc="配置学生回答、老师评审和多轮改进。" onclick="openSettingsSection('reflection')"><span>🎭</span><span>师生讨论</span></button>
+    <button class="settings-nav-item" data-settings-section="tools" data-desc="管理 AI 可调用的工具、预设和内置工具开关。" onclick="openSettingsSection('tools')"><span>🛠</span><span>工具管理</span></button>
+    <button class="settings-nav-item" data-settings-section="taskQueue" data-desc="管理自动任务、依赖关系和队列执行。" onclick="openSettingsSection('taskQueue')"><span>🧾</span><span>任务队列</span></button>
+    <button class="settings-nav-item" data-settings-section="mcpSkill" data-desc="管理可注入的 Skill 根目录和 MCP 工具摘要。" onclick="openSettingsSection('mcpSkill')"><span>🔌</span><span>MCP / Skill</span></button>
+    <button class="settings-nav-item" data-settings-section="projectMemory" data-desc="管理当前项目的长期记忆文件和注入策略。" onclick="openSettingsSection('projectMemory')"><span>🧠</span><span>项目记忆</span></button>
+    <button class="settings-nav-item" data-settings-section="jsonEditor" data-desc="查看实际请求、响应、模板、请求头和历史。" onclick="openSettingsSection('jsonEditor')"><span>{ }</span><span>JSON 查看器</span></button>
+    <button class="settings-nav-item" data-settings-section="backup" data-desc="导出和导入配置、工具、归档和模式设置。" onclick="openSettingsSection('backup')"><span>💾</span><span>备份恢复</span></button>
+    <button class="settings-nav-item" data-settings-section="permissions" data-desc="管理工具调用授权、临时权限和本地敏感凭证。" onclick="openSettingsSection('permissions')"><span>🔐</span><span>权限管理</span></button>
+    <button class="settings-nav-item" data-settings-section="pricing" data-desc="配置模型 token 单价和费用估算规则。" onclick="openSettingsSection('pricing')"><span>💰</span><span>定价管理</span></button>
+    <button class="settings-nav-item" data-settings-section="tokenUsage" data-desc="查看全局 token 使用、费用估算和历史账本。" onclick="openSettingsSection('tokenUsage')"><span>📊</span><span>Token 统计</span></button>
+    <button class="settings-nav-item" data-settings-section="contextLimit" data-desc="快速定位到主设置中的模型上下文和自动压缩配置。" onclick="openSettingsSection('contextLimit')"><span>📐</span><span>上下文长度</span></button>
+    <button class="settings-nav-item" data-settings-section="git" data-desc="查看仓库状态、提交历史、文件 diff 和提交操作。" onclick="openSettingsSection('git')"><span>🌿</span><span>Git 管理</span></button>
+  </aside>
+  <main class="settings-page-main">
+    <div class="settings-page-top">
+      <div>
+        <h1 id="settingsPageHeading">主设置</h1>
+        <p id="settingsPageDesc">管理 API、模型、上下文、代理和本地授权。</p>
+      </div>
+      <div class="settings-page-actions">
+        <button class="settings-theme-btn" onclick="toggleTheme()" id="themeBtn" title="切换主题">🌙</button>
+        <button class="settings-page-close" onclick="closeSettingsPage()" title="关闭">×</button>
+      </div>
+    </div>
+    <div class="settings-page-content" id="settingsPageContent"></div>
+  </main>
+</div>
+
+<!-- ============ 🎓 LMS 学习面板（抽屉式） ============ -->
+<aside class="lms-panel" id="lmsPanel">
+  <div class="lms-panel-header">
+    <div class="lms-panel-title">
+      <span style="font-size:20px;">🎓</span>
+      <span>学习助手</span>
+      <span class="lms-panel-sub">西安交大 LMS</span>
+    </div>
+    <button class="lms-panel-close" onclick="closeLmsPanel()" title="关闭">×</button>
+  </div>
+
+  <div class="lms-panel-statusbar" id="lmsStatusBar">
+    <span class="lms-badge lms-badge-warn">⚠️ 未配置</span>
+  </div>
+
+  <div class="lms-panel-tabs">
+    <button class="lms-tab active" id="lmsTab_overview"  onclick="lmsPanelSetTab('overview')">📊 概览</button>
+    <button class="lms-tab"        id="lmsTab_todos"     onclick="lmsPanelSetTab('todos')">📝 待办</button>
+    <button class="lms-tab"        id="lmsTab_courses"   onclick="lmsPanelSetTab('courses')">📚 课程</button>
+    <button class="lms-tab"        id="lmsTab_materials" onclick="lmsPanelSetTab('materials')">📂 课件</button>
+  </div>
+
+  <div class="lms-panel-body" id="lmsPanelBody"></div>
+
+  <div class="lms-panel-foot">
+    <span>💡 一句话试试：</span>
+    <span class="lms-hint-chip" onclick="useSuggestion('看看我现在有什么未完成作业')">「看看我有什么作业」</span>
+    <span class="lms-hint-chip" onclick="useSuggestion('查一下操作系统课的课件')">「查课件」</span>
+  </div>
+</aside>
+
+<!-- ============ LMS Cookie 编辑器（小弹窗） ============ -->
+<div class="modal-mask" id="lmsCookieModal">
+  <div class="modal">
+    <h2>🔑 配置 LMS Cookie <button class="modal-close" onclick="lmsPanelCloseCookieEditor()">×</button></h2>
+    <div class="form-group">
+      <label>📋 粘贴你的 LMS Cookie（含 <code>session=...</code> 字段）</label>
+      <textarea id="lmsCookieInput" rows="5" placeholder="_ga=...; session=V2-1-...; ..." oninput="lmsPanelCookieParse()" style="width:100%;font-family:Consolas,monospace;font-size:12px;"></textarea>
+    </div>
+    <div id="lmsCookieParseResult" style="background:var(--bg-input);padding:10px;border-radius:6px;font-size:13px;line-height:1.7;"></div>
+    <details style="margin-top:12px;font-size:13px;color:var(--text-secondary);">
+      <summary style="cursor:pointer;">📝 如何获取 Cookie？</summary>
+      <ol style="padding-left:20px;line-height:1.8;">
+        <li>浏览器登录 <a href="https://lms.xjtu.edu.cn" target="_blank">lms.xjtu.edu.cn</a></li>
+        <li>按 <kbd>F12</kbd> → 切到 <strong>Console</strong></li>
+        <li>输入 <code>copy(document.cookie)</code> 回车</li>
+        <li>回到这里粘贴</li>
+      </ol>
+      <p style="margin-top:8px;">⏰ Cookie 大约 24 小时过期，过期后重新走一遍。</p>
+    </details>
+    <div class="modal-footer">
+      <button class="btn" onclick="lmsPanelClearCookie()" style="color:var(--danger,#e74c3c);">🗑 清空</button>
+      <button class="btn" onclick="lmsPanelCloseCookieEditor()">取消</button>
+      <button class="btn btn-primary" onclick="lmsPanelSaveCookie()">💾 保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ LMS 内嵌弹窗（作业详情等） ============ -->
+<div class="modal-mask" id="lmsModal">
+  <div class="modal wide">
+    <h2>📖 详情 <button class="modal-close" onclick="lmsPanelCloseModal()">×</button></h2>
+    <div id="lmsModalContent" class="msg-content" style="max-height:60vh;overflow-y:auto;"></div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="lmsPanelCloseModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ JS 加载（顺序很重要！）============ -->
+<!-- ⭐ idb-store.js 必须最先加载：它提供 storage 同步 API 和 localStorage 垫片，
+     后续所有 .js 中的 storage.xxx / localStorage.xxx 调用都依赖它 -->
+<script src="js/idb-store.js"></script>
+<script src="js/config.js"></script>
+<script src="js/state.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/project-memory.js"></script>
+<script src="js/mcp-skills.js"></script>
+<script src="js/rate-limiter.js"></script> 
+<script src="js/markdown.js"></script>
+<script src="js/theme.js"></script>
+<script src="js/tokens.js"></script>
+<script src="js/pricing.js"></script>
+<script src="js/token-usage.js"></script>
+<script src="js/api-adapters.js"></script>
+<script src="js/api-core.js"></script>
+<script src="js/api-stream.js"></script>
+<script src="js/tools.js"></script>
+<script src="js/terminal.js"></script>
+<script src="js/git-panel.js"></script>
+<script src="js/reflection.js"></script>
+<script src="js/plan-core.js"></script>
+<script src="js/plan-ui.js"></script>
+<script src="js/outline-prompts.js"></script>
+<script src="js/outline-core.js"></script>
+<script src="js/outline-render.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/api-profiles.js"></script>
+<script src="js/json-editor.js"></script>
+<script src="js/backup.js"></script>
+<script src="js/permissions.js"></script>
+<script src="js/trace.js"></script>
+<script src="js/lms.js"></script>
+<script src="js/lms_panel.js"></script>
+<script src="js/paper_tools.js"></script>
+<script src="js/beacon.js"></script>
+<script src="js/chat.js"></script>
+<script src="js/task-queue.js"></script>
+<script src="js/settings-page.js"></script>
+<script src="js/main.js"></script>
+
+</body>
+</html>
+
